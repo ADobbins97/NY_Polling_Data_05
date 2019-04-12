@@ -1,0 +1,204 @@
+---
+title: "problem-set-5-ADobbins97"
+author: "Alexandra Dobbins"
+date: "3/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+
+library(tidyverse)
+library(readr)
+library(readtext)
+library(janitor)
+library(dplyr)
+library(openintro)
+library(humaniformat)
+library(gt)
+library(stringi)
+library(fs)
+
+```
+
+```{r, echo = FALSE}
+
+download.file(url = "https://www.fec.gov/files/bulk-downloads/2006/weball06.zip",
+              destfile ="weball06.zip", 
+              mode = "wb")
+
+download.file(url = "https://www.fec.gov/files/bulk-downloads/2006/cm06.zip",
+              destfile = "cm06.zip", 
+              mode = "wb")
+
+download.file(url = "https://www.fec.gov/files/bulk-downloads/2006/indiv06.zip",
+              destfile = "indiv06.zip", 
+              mode = "wb")
+
+
+
+
+#delete files
+
+ cands <- read_delim("weball06.zip", delim = "|", col_names = FALSE, escape_double = FALSE) %>%
+   clean_names() %>% 
+    select("cand_id" = x1, "cand_name" = x2, "party" = x5, "cash" = x11, "cand_state" = x19)
+ 
+ comm <- read_delim("cm06.zip", delim = "|", col_names = FALSE, escape_double = FALSE) %>% 
+   clean_names() %>% 
+   select("cand_id" = x15, "cmte_id" = x1, "cmte_party" = x11)
+ 
+ contrib <- read_delim("indiv06.zip", delim = "|", col_names = FALSE, escape_double = FALSE, guess_max = 30000) %>%
+   clean_names() %>% 
+   select("cmte_id" = x1, "date" = x14, "amount" = x15, "employer" = x12, "occupation" = x13)
+ 
+```
+ 
+ 
+```{r}
+ #Question 1
+ most_rows<-
+   cands %>%
+   filter(cand_state != "00") %>% 
+    select(cand_state) %>% 
+    group_by(cand_state) %>% 
+    count() %>% 
+    arrange(desc(n))
+ mad_1 <- most_rows$cand_state[3]
+    
+ 
+names <-
+   cands %>%
+   select(cand_name) %>% 
+   separate(cand_name, into = c("Last", "First"), sep = ",", remove = FALSE) %>% 
+   mutate(Last = str_trim(Last)) %>% 
+   mutate(First = str_trim(First)) %>% 
+   mutate(first_last = paste(First, Last)) %>% 
+   mutate(first_last = str_to_title(first_last)) %>% 
+   mutate(name_length = str_length(first_last)) %>% 
+    arrange(desc(name_length))
+mad_2 <- names$first_last[5]
+   
+  
+last_name <- 
+  names %>% 
+  mutate(last_length = str_length(Last)) %>%
+  arrange(desc(last_length))
+mad_3 <- last_name$first_last[1]  
+   
+```
+
+**Question 1:**
+
+The state with the 3rd most rows is `r mad_1`.
+
+The candidate with the 5th longest full name is `r mad_2`. 
+
+The candidate with the longest last name is `r mad_3`. 
+
+
+**Question 2:**
+```{r}
+#Question 2
+
+cash <- 
+  cands %>% 
+  select(cash, party) %>%
+  group_by(party) %>% 
+  summarize(total_cash = sum(cash)) %>% 
+  mutate(currency = paste("$", format(total_cash, big.mark = ","), sep = "")) %>% 
+  arrange(desc(total_cash)) %>% 
+  select(party, currency) %>% 
+  slice(1:5)
+  cash[1,1] <- "Democrats"
+  cash[2,1] <- "Republicans"
+  cash[3,1] <- "Independents"
+  cash[4,1] <- "Democratic-Farmer-Laborers"
+  cash[5,1] <- "Representatives"
+
+
+
+  cash %>% 
+  gt() %>% 
+  tab_header(title = "Greatest Spending in the 2005-2006 Year by Party",
+             subtitle = "Five parties with the highest net spending during period regardless of purpose") %>% 
+  cols_label(
+    party = "Political Party",
+    currency = "Aggregate Cash Holding"
+  ) %>% 
+    tab_source_note(source_note = "Source: Federal Election Commission")
+
+```
+
+**Question 3:**
+
+```{r echo = FALSE, message = FALSE}
+#Question 3
+
+q_3 <-
+comm %>% 
+  mutate(party = recode(cmte_party, DEM = "Democrat", 
+                        Dem = "Democrat", 
+                        dem = "Democrat", 
+                        d = "Democrat", 
+                        REP = "Republican", 
+                        Rep = "Republican", 
+                        rep = "Republican",
+                        r = "Republican",
+                        .default = "Other")) %>% 
+  group_by(party) %>% 
+  summarize(distinct_cand = n_distinct(cand_id), distinct_cmte = n_distinct(cmte_id)) %>% 
+  arrange(desc(distinct_cand)) %>% 
+  filter(!is.na(party))
+  
+q_3 %>% 
+  gt() %>% 
+  cols_label(party = "Party", distinct_cand = "Candidates", distinct_cmte = "Committees") %>% 
+  tab_header(title = "Number of Candidates vs. Committees for Each Party in 2005-2006") %>% 
+  tab_source_note(source_note = "Source: Federal Election Commission")
+  
+
+```
+
+**Question 4:**
+
+```{r echo = FALSE, message = FALSE}
+#Question 4
+
+one_two <- left_join(contrib, comm, by = "cmte_id")
+three_four<-
+  left_join(one_two, cands, by = "cand_id") %>%
+  filter(employer == "HARVARD UNIVERSITY") %>% 
+  mutate(occupation = str_to_upper(occupation)) %>% 
+  mutate(professor = str_detect(occupation, "PROFESSOR")) %>% 
+  filter(amount > 0) %>% 
+  filter(professor == TRUE, !is.na(party)) %>% 
+  mutate(date = parse_date(date, format = "%m%d%Y")) %>% 
+  mutate(quarter = cut(date, breaks = "quarter")) %>% 
+  select(quarter, party) %>% 
+  group_by(party, quarter) %>% 
+  summarize(nas = n()) %>% 
+  spread(key = party, value = nas, fill = 0)
+  
+  
+question_41 <-
+  three_four %>% 
+  gt() %>% 
+  cols_label(quarter = "Quarter", DEM = "Democrats", REP = "Republicans") %>% 
+  tab_header(title = "Number of Harvard Professors Donating to Political Candidates",
+             subtitle = "Donations per quarter in 2005-2006")
+
+
+question_41
+
+  one_two <- left_join(contrib, comm, by = "cmte_id")
+question_5 <-
+  left_join(one_two, cands, by = "cand_id") %>%
+  filter(employer == "HARVARD UNIVERSITY")
+
+write_rds(question_5, "question_5.rds")
+  
+```
+
+**Collaborators:**
+Chris Milne, Mike Silva, Nicholas Dow
